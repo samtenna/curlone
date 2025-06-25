@@ -1,20 +1,22 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Uri = std.Uri;
+const Method = std.http.Method;
 
 const Args = struct {
     method: Method,
-    url: []const u8,
+    uri: Uri,
 };
 
-const Method = enum {
-    GET,
-    POST,
-    PUT,
-    DELETE,
+const ArgumentsError = error{
+    InvalidFlag,
+    InvalidMethod,
+    MalformedArguments,
 };
 
-pub fn processArgs(alloc: std.mem.Allocator) !void {
+pub fn processArgs(alloc: std.mem.Allocator) !Args {
     var argsText = try std.process.argsWithAllocator(alloc);
+    defer argsText.deinit();
     var list = ArrayList([]const u8).init(alloc);
 
     while (argsText.next()) |arg| {
@@ -23,18 +25,18 @@ pub fn processArgs(alloc: std.mem.Allocator) !void {
 
     var args = Args{
         .method = Method.GET,
-        .url = "127.0.0.1",
+        .uri = try Uri.parse("http://localhost:80"),
     };
 
     if (list.items.len < 2 or list.items.len % 2 != 0) {
-        return error.InvalidArguments;
+        return ArgumentsError.MalformedArguments;
     }
 
-    // disregard the first and last arguments (executable and url)
+    // disregard the first and last arguments (executable and uri)
     var i: usize = 1;
     while (i < list.items.len) : (i += 2) {
         if (list.items[i][0] != '-') {
-            // must be at the start of the url
+            // must be at the start of the uri
             break;
         }
 
@@ -49,17 +51,17 @@ pub fn processArgs(alloc: std.mem.Allocator) !void {
                 } else if (std.mem.eql(u8, list.items[i + 1], "DELETE")) {
                     args.method = Method.DELETE;
                 } else {
-                    return error.InvalidMethod;
+                    return ArgumentsError.InvalidMethod;
                 }
             },
-            else => {
-                std.debug.print("found unknown option: {s}\n", .{list.items[i]});
-            },
+            else => return ArgumentsError.InvalidFlag,
         }
     }
 
-    const url = list.items[list.items.len - 1];
-    args.url = url;
+    const original_uri_slice = list.items[list.items.len - 1];
+    const owned_uri = try alloc.dupe(u8, original_uri_slice);
+    const uri = try std.Uri.parse(owned_uri);
+    args.uri = uri;
 
-    std.debug.print("Method: {s}, URL: {s}\n", .{ @tagName(args.method), args.url });
+    return args;
 }
